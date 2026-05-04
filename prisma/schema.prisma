@@ -1,0 +1,117 @@
+// This is your Prisma schema file.
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// In production, this is postgresql. Used sqlite for local AI Studio preview constraint.
+datasource db {
+  provider = "sqlite" 
+  url      = "file:./dev.db"
+}
+
+// ------------------------------------------------------
+// 🏫 MULTI-TENANT CORE
+// ------------------------------------------------------
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String   // e.g., "Delhi Public School"
+  domain      String   @unique // e.g., "dps.platform.com"
+  settings    String?  // JSON: branding, grading scales, etc.
+  createdAt   DateTime @default(now())
+  
+  users       User[]
+  students    Student[]
+  batches     UploadBatch[]
+}
+
+// ------------------------------------------------------
+// 🔐 RBAC / USERS
+// ------------------------------------------------------
+model User {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  
+  name      String
+  email     String   @unique
+  role      String   // "SUPER_ADMIN", "ADMIN", "HOD", "MENTOR"
+  password  String   // bcrypt hash
+  
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+// ------------------------------------------------------
+// 🎓 STUDENT RECORDS
+// ------------------------------------------------------
+model Student {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+  
+  registrationNumber String
+  fullName           String
+  department         String
+  batchYear          Int
+  
+  parentEmail        String?
+  parentPhone        String?
+  
+  academicRecords    AcademicRecord[]
+  communications     CommunicationLog[]
+
+  @@unique([tenantId, registrationNumber])
+}
+
+model AcademicRecord {
+  id               String   @id @default(uuid())
+  studentId        String
+  student          Student  @relation(fields: [studentId], references: [id])
+  
+  semester         Int
+  cgpa             Float
+  tgpa             Float
+  attendancePercent Float
+  
+  // JSON array of subjects: [{ subject: "Math", ca: 25, mid: 40, end: 80 }]
+  subjectsData     String   
+  
+  riskCategory     String   @default("SAFE") // SAFE, MONITOR, AT_RISK
+  aiSummary        String?  // Generated insights
+
+  createdAt        DateTime @default(now())
+
+  @@unique([studentId, semester])
+}
+
+// ------------------------------------------------------
+// 📧 COMMUNICATIONS & INGESTION
+// ------------------------------------------------------
+model CommunicationLog {
+  id          String   @id @default(uuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
+  
+  channel     String   // EMAIL, SMS, WHATSAPP
+  recipient   String
+  status      String   // QUEUED, SENT, DELIVERED, BOUNCED
+  content     String   // Text or JSON of sent item
+  
+  sentAt      DateTime @default(now())
+}
+
+model UploadBatch {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  filename    String
+  uploaderId  String
+  status      String   // PENDING, VALIDATING, APPROVED, REJECTED
+  errors      String?  // JSON error report
+  
+  createdAt   DateTime @default(now())
+}
