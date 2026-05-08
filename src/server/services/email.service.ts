@@ -1,18 +1,20 @@
-import * as Brevo from "@getbrevo/brevo";
+import axios from "axios";
 
 // ============================================================
 // BREVO TRANSACTIONAL EMAIL SERVICE
 // ============================================================
-// Wraps the Brevo SDK for type-safe email dispatching.
+// Uses the Brevo REST API directly via axios (v5 SDK has
+// constructor issues in ESM; this is the stable alternative).
 // In production: store BREVO_API_KEY in your secrets manager.
 // ============================================================
 
-const apiInstance = new Brevo.TransactionalEmailsApi();
+const BREVO_URL = "https://api.brevo.com/v3/smtp/email";
 
-apiInstance.setApiKey(
-  Brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY || ""
-);
+const brevoHeaders = {
+  "api-key": process.env.BREVO_API_KEY || "",
+  "Content-Type": "application/json",
+};
+
 
 export interface StudentRecord {
   id: string;
@@ -134,19 +136,19 @@ export async function sendParentReport(
   student: StudentRecord,
   report: ReportData
 ): Promise<{ messageId?: string }> {
-  const emailPayload = new Brevo.SendSmtpEmail();
-
-  emailPayload.sender = {
-    name: process.env.SENDER_NAME || "Academic Portal",
-    email: process.env.SENDER_EMAIL || "reports@yourcollege.com",
+  const payload: Record<string, unknown> = {
+    sender: {
+      name: process.env.SENDER_NAME || "Academic Portal",
+      email: process.env.SENDER_EMAIL || "reports@yourcollege.com",
+    },
+    to: [{ email: student.parentEmail, name: student.parentName }],
+    subject: `Academic Report — ${student.name} | Semester ${report.semester}`,
+    htmlContent: generateEmailHTML(student, report),
   };
-  emailPayload.to = [{ email: student.parentEmail, name: student.parentName }];
-  emailPayload.subject = `Academic Report — ${student.name} | Semester ${report.semester}`;
-  emailPayload.htmlContent = generateEmailHTML(student, report);
 
   // Attach PDF if available
   if (report.pdfBase64) {
-    emailPayload.attachment = [
+    payload.attachment = [
       {
         content: report.pdfBase64,
         name: `${student.name.replace(/\s+/g, "_")}_Sem${report.semester}_Report.pdf`,
@@ -154,7 +156,7 @@ export async function sendParentReport(
     ];
   }
 
-  const result = await apiInstance.sendTransacEmail(emailPayload);
-  console.log(`[Brevo] Email sent to ${student.parentEmail} — ID: ${result.body?.messageId}`);
-  return result.body || {};
+  const res = await axios.post(BREVO_URL, payload, { headers: brevoHeaders });
+  console.log(`[Brevo] Email sent to ${student.parentEmail} — ID: ${res.data.messageId}`);
+  return { messageId: res.data.messageId };
 }

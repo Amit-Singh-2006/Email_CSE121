@@ -109,7 +109,3 @@ export function Dashboard() {
     </div>
   );
 }
-
-function LineChart(props: any) {
-  return <ArrowUpRight {...props} /> // Fallback icon
-}
