@@ -49,3 +49,6 @@ app.listen(PORT, () => {
 
 const aiRouter = require('./routes/ai');
 app.use('/api/ai', aiRouter);
+
+const uploadRouter = require('./routes/upload');
+app.use('/api/upload', uploadRouter);
