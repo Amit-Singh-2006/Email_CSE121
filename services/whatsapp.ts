@@ -10,8 +10,8 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
-// Send hello_world test template
-async function sendTestMessage(toNumber) {
+// ─── Send hello_world test template ───────────────────────────────────────────
+export async function sendTestMessage(toNumber: string) {
   const payload = {
     messaging_product: "whatsapp",
     to: toNumber.replace('+', ''),
@@ -26,8 +26,17 @@ async function sendTestMessage(toNumber) {
   return res.data;
 }
 
-// Send attendance alert (after template approved)
-async function sendAttendanceAlert(toNumber, studentName, attendance) {
+// ─── Send attendance alert ─────────────────────────────────────────────────────
+// Template variables:
+//   {{1}} = studentName  e.g. "Rahul Sharma"
+//   {{2}} = rollNumber   e.g. "CS2024001"
+//   {{3}} = attendance   e.g. "68"
+export async function sendAttendanceAlert(
+  toNumber: string,
+  studentName: string,
+  rollNumber: string,
+  attendance: number
+) {
   const payload = {
     messaging_product: "whatsapp",
     to: toNumber.replace('+', ''),
@@ -39,14 +48,43 @@ async function sendAttendanceAlert(toNumber, studentName, attendance) {
         type: "body",
         parameters: [
           { type: "text", text: studentName },
+          { type: "text", text: rollNumber },
           { type: "text", text: String(attendance) }
         ]
       }]
     }
   };
 
-  const res = await axios.post(BASE_URL, payload, { headers });
-  return res.data;
+  try {
+    const res = await axios.post(BASE_URL, payload, { headers });
+    console.log(`✅ Alert sent to ${toNumber} for ${studentName}`);
+    return { success: true, data: res.data };
+  } catch (error: any) {
+    console.error(`❌ Failed:`, error.response?.data);
+    return { success: false, error: error.response?.data };
+  }
 }
 
-export { sendTestMessage, sendAttendanceAlert };
+// ─── Bulk send to multiple parents ────────────────────────────────────────────
+export async function sendBulkAttendanceAlerts(students: {
+  parentPhone: string;
+  studentName: string;
+  rollNumber: string;
+  attendance: number;
+}[]) {
+  const results = [];
+
+  for (const student of students) {
+    await new Promise(resolve => setTimeout(resolve, 500)); // rate limit protection
+    const result = await sendAttendanceAlert(
+      student.parentPhone,
+      student.studentName,
+      student.rollNumber,
+      student.attendance
+    );
+    results.push({ student: student.studentName, ...result });
+  }
+
+  console.log(`📊 Bulk: ${results.filter(r => r.success).length}/${students.length} sent`);
+  return results;
+}

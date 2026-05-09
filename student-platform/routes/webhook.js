@@ -91,7 +91,7 @@ function handleStatusUpdate(status) {
 }
 
 // ─── Reply helpers ─────────────────────────────────────────────────────────────
-// const { sendWhatsAppText } = require('../services/whatsappReply');
+const { sendWhatsAppText } = require('../services/whatsappReply');
 
 async function sendPortalLink(toNumber) {
   const portalUrl = `${process.env.FRONTEND_URL}/parent-portal`;
