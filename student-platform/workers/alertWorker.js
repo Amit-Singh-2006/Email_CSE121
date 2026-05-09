@@ -1,112 +1,162 @@
 require('dotenv').config();
-const { sendAttendanceAlert, sendBulkAttendanceAlerts } = require('../services/whatsapp');
-const { sendBulkReports } = require('../services/email');
-
-// ─── Mock student data (replace with Prisma DB query later) ───────────────────
-// This is what your DB query will return
-const getMockStudents = () => [
-  {
-    id: 1,
-    name: 'Rahul Sharma',
-    rollNumber: 'CS2024001',
-    parentPhone: '+917877076804', // your test number for now
-    parentEmail: 'parent1@example.com',
-    parentName: 'Mr. Sharma',
-    department: 'Computer Science',
-    semester: 4,
-    attendance: 68,
-    cgpa: 7.2,
-    subjects: [
-      { name: 'Data Structures', ca: 18, mid: 22, end: 45, total: 85 },
-      { name: 'DBMS', ca: 15, mid: 18, end: 38, total: 71 },
-      { name: 'OS', ca: 12, mid: 20, end: 40, total: 72 },
-    ],
-    mentorNote: 'Student needs to improve attendance and focus on DBMS.'
-  },
-  {
-    id: 2,
-    name: 'Priya Patel',
-    rollNumber: 'CS2024002',
-    parentPhone: '+917877076804', // same test number
-    parentEmail: 'parent2@example.com',
-    parentName: 'Mrs. Patel',
-    department: 'Computer Science',
-    semester: 4,
-    attendance: 55, // critical
-    cgpa: 6.1,
-    subjects: [
-      { name: 'Data Structures', ca: 10, mid: 15, end: 30, total: 55 },
-      { name: 'DBMS', ca: 12, mid: 14, end: 32, total: 58 },
-    ],
-    mentorNote: 'Urgent: Student attendance is critically low.'
-  }
-];
+const prisma = require('../lib/prisma');
+const { sendAttendanceAlert } = require('../services/whatsapp');
+const { sendStudentReport } = require('../services/email');
 
 // ─── Check and send attendance alerts ─────────────────────────────────────────
-// threshold: send alert if attendance below this % (default 75)
-async function checkAndSendAttendanceAlerts(threshold = 75) {
+async function checkAndSendAttendanceAlerts(threshold = 75, tenantId = null) {
   console.log(`\n🔍 Checking attendance alerts (threshold: ${threshold}%)...`);
 
-  // Replace this with: const students = await prisma.student.findMany({ where: { attendance: { lt: threshold } } });
-  const allStudents = getMockStudents();
-  const atRiskStudents = allStudents.filter(s => s.attendance < threshold);
+  try {
+    const atRiskStudents = await prisma.student.findMany({
+      where: {
+        isActive: true,
+        attendance: { lt: threshold },
+        parentPhone: { not: null },
+        ...(tenantId && { tenantId })
+      },
+      include: {
+        department: true,
+        semesterRecords: {
+          orderBy: { semester: 'desc' },
+          take: 1,
+          include: { subjects: true }
+        }
+      }
+    });
 
-  if (atRiskStudents.length === 0) {
-    console.log('✅ No students below threshold. No alerts needed.');
-    return;
+    if (atRiskStudents.length === 0) {
+      console.log(`✅ No students below ${threshold}% attendance.`);
+      return { whatsappResults: [], emailResults: [] };
+    }
+
+    console.log(`⚠️  Found ${atRiskStudents.length} students below ${threshold}%`);
+    atRiskStudents.forEach(s => console.log(`   - ${s.name}: ${s.attendance}%`));
+
+    const whatsappResults = [];
+    const emailResults = [];
+
+    for (const student of atRiskStudents) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Send WhatsApp
+      const waResult = await sendAttendanceAlert(
+        student.parentPhone,
+        student.name,
+        student.rollNumber,
+        student.attendance
+      );
+      whatsappResults.push({ student: student.name, ...waResult });
+      await logCommunication({ tenantId: student.tenantId, studentId: student.id, channel: 'WHATSAPP', type: 'attendance_alert', recipient: student.parentPhone, result: waResult });
+
+      // Send Email
+      if (student.parentEmail) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const emailResult = await sendStudentReport(formatStudentForEmail(student));
+        emailResults.push({ student: student.name, ...emailResult });
+        await logCommunication({ tenantId: student.tenantId, studentId: student.id, channel: 'EMAIL', type: 'attendance_alert_report', recipient: student.parentEmail, result: emailResult });
+      }
+
+      // Update risk category
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { riskCategory: calculateRiskCategory(student.attendance, student.cgpa) }
+      });
+    }
+
+    const waSent = whatsappResults.filter(r => r.success).length;
+    const emailSent = emailResults.filter(r => r.success).length;
+    console.log(`\n📊 Summary: WhatsApp ${waSent}/${atRiskStudents.length} | Email ${emailSent}/${atRiskStudents.length}`);
+
+    return { whatsappResults, emailResults };
+
+  } catch (error) {
+    console.error('❌ Alert worker error:', error);
+    throw error;
   }
-
-  console.log(`⚠️  Found ${atRiskStudents.length} students below ${threshold}% attendance`);
-
-  // Send WhatsApp alerts
-  const whatsappResults = await sendBulkAttendanceAlerts(
-    atRiskStudents.map(s => ({
-      parentPhone: s.parentPhone,
-      studentName: s.name,
-      rollNumber: s.rollNumber,
-      attendance: s.attendance
-    }))
-  );
-
-  // Send Email reports
-  const emailResults = await sendBulkReports(atRiskStudents);
-
-  // Summary
-  const waSent = whatsappResults.filter(r => r.success).length;
-  const emailSent = emailResults.filter(r => r.success).length;
-
-  console.log(`\n📊 Alert Summary:`);
-  console.log(`   WhatsApp: ${waSent}/${atRiskStudents.length} sent`);
-  console.log(`   Email:    ${emailSent}/${atRiskStudents.length} sent`);
-
-  return { whatsappResults, emailResults };
 }
 
 // ─── Send monthly reports to ALL students ─────────────────────────────────────
-async function sendMonthlyReportsToAll() {
+async function sendMonthlyReportsToAll(tenantId = null) {
   console.log('\n📅 Sending monthly reports to all students...');
 
-  // Replace with: const students = await prisma.student.findMany();
-  const allStudents = getMockStudents();
+  const students = await prisma.student.findMany({
+    where: { isActive: true, parentEmail: { not: null }, ...(tenantId && { tenantId }) },
+    include: { department: true, semesterRecords: { orderBy: { semester: 'desc' }, take: 1, include: { subjects: true } } }
+  });
 
-  const emailResults = await sendBulkReports(allStudents);
-  const sent = emailResults.filter(r => r.success).length;
-  console.log(`✅ Monthly reports: ${sent}/${allStudents.length} sent`);
+  let sent = 0;
+  for (const student of students) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const result = await sendStudentReport(formatStudentForEmail(student));
+    if (result.success) {
+      sent++;
+      await logCommunication({ tenantId: student.tenantId, studentId: student.id, channel: 'EMAIL', type: 'monthly_report', recipient: student.parentEmail, result });
+    }
+  }
+
+  console.log(`✅ Monthly reports: ${sent}/${students.length} sent`);
+  return { sent, total: students.length };
 }
 
-// ─── Run manually for testing ──────────────────────────────────────────────────
-// node workers/alertWorker.js
-if (require.main === module) {
-  console.log('🧪 Running alert worker manually...\n');
-  checkAndSendAttendanceAlerts(75)
-    .then(() => {
-      console.log('\n✅ Done!');
-      process.exit(0);
-    })
-    .catch(err => {
-      console.error('❌ Error:', err);
-      process.exit(1);
+// ─── Get analytics ─────────────────────────────────────────────────────────────
+async function getAnalytics(tenantId = null) {
+  const where = { isActive: true, ...(tenantId && { tenantId }) };
+  const [total, atRisk, critical, onTrack, avgAtt, avgCgpa] = await Promise.all([
+    prisma.student.count({ where }),
+    prisma.student.count({ where: { ...where, riskCategory: 'AT_RISK' } }),
+    prisma.student.count({ where: { ...where, riskCategory: 'CRITICAL' } }),
+    prisma.student.count({ where: { ...where, riskCategory: 'ON_TRACK' } }),
+    prisma.student.aggregate({ where, _avg: { attendance: true } }),
+    prisma.student.aggregate({ where, _avg: { cgpa: true } })
+  ]);
+  return {
+    totalStudents: total, atRisk, critical, onTrack,
+    monitor: total - atRisk - critical - onTrack,
+    avgAttendance: Math.round(avgAtt._avg.attendance || 0),
+    avgCgpa: (avgCgpa._avg.cgpa || 0).toFixed(2)
+  };
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+async function logCommunication({ tenantId, studentId, channel, type, recipient, result }) {
+  try {
+    await prisma.communicationLog.create({
+      data: {
+        tenantId, studentId, channel, type, recipient,
+        status: result.success ? 'SENT' : 'FAILED',
+        messageId: result.data?.messages?.[0]?.id || result.messageId || null,
+        failReason: result.success ? null : JSON.stringify(result.error),
+        sentAt: result.success ? new Date() : null
+      }
     });
+  } catch (err) {
+    console.error('Log error:', err.message);
+  }
 }
 
-module.exports = { checkAndSendAttendanceAlerts, sendMonthlyReportsToAll };
+function formatStudentForEmail(student) {
+  const latestSem = student.semesterRecords?.[0];
+  return {
+    name: student.name, rollNumber: student.rollNumber,
+    parentName: student.parentName, parentEmail: student.parentEmail,
+    department: student.department?.name, semester: student.currentSemester,
+    cgpa: student.cgpa, attendance: student.attendance,
+    subjects: latestSem?.subjects?.map(s => ({ name: s.subjectName, ca: s.caMarks, mid: s.midtermMarks, end: s.endtermMarks, total: s.totalMarks }))
+  };
+}
+
+function calculateRiskCategory(attendance, cgpa) {
+  if (attendance < 50 || cgpa < 4) return 'CRITICAL';
+  if (attendance < 65 || cgpa < 5) return 'AT_RISK';
+  if (attendance < 75 || cgpa < 7) return 'MONITOR';
+  return 'ON_TRACK';
+}
+
+if (require.main === module) {
+  checkAndSendAttendanceAlerts(75)
+    .then(() => { console.log('\n✅ Done!'); process.exit(0); })
+    .catch(err => { console.error('❌', err); process.exit(1); });
+}
+
+module.exports = { checkAndSendAttendanceAlerts, sendMonthlyReportsToAll, getAnalytics };

@@ -46,3 +46,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📡 Webhook endpoint: http://localhost:${PORT}/webhook`);
 });
+
+const aiRouter = require('./routes/ai');
+app.use('/api/ai', aiRouter);

@@ -17,4 +17,15 @@ router.post('/monthly', async (req, res) => {
   res.json({ success: true, message: 'Monthly reports queued' });
 });
 
+// GET /api/alerts/analytics
+router.get('/analytics', async (req, res) => {
+  try {
+    const { getAnalytics } = require('../workers/alertWorker');
+    const data = await getAnalytics();
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
