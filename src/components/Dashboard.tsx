@@ -88,7 +88,7 @@ export function Dashboard() {
       </div>
 
       {/* AI Insights Panel */}
-      <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-xl shadow-md p-6 text-white border border-blue-800">
+      <div className="bg-linear-to-r from-blue-900 to-indigo-900 rounded-xl shadow-md p-6 text-white border border-blue-800">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2 bg-blue-500/20 rounded-lg">
             <ArrowUpRight className="w-5 h-5 text-blue-300" />

@@ -3,7 +3,6 @@ const router = express.Router();
 const { sendStudentReport } = require('../services/email');
 const { sendAttendanceAlert } = require('../services/whatsapp');
 
-
 // Mock data — replace with Prisma queries later
 const students = [
   {

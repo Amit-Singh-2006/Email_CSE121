@@ -16,7 +16,7 @@ async function sendTestMessage(toNumber) {
     type: "template",
     template: {
       name: "hello_world",
-      language: { code: "en_US" }
+      language: { code: "en" }
     }
   };
 
@@ -36,15 +36,23 @@ async function sendAttendanceAlert(toNumber, studentName, rollNumber, attendance
     type: "template",
     template: {
       name: "attendance_alert",
-      language: { code: "en_US" },
-      components: [{
-        type: "body",
-        parameters: [
-          { type: "text", text: String(studentName) },
-          { type: "text", text: String(rollNumber) },
-          { type: "text", text: String(attendance) }
-        ]
-      }]
+      language: { code: "en" },
+      components: [
+        {
+          type: "header",
+          parameters: [
+            { type: "text", text: String(studentName) }
+          ]
+        },
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: String(studentName) },
+            { type: "text", text: String(rollNumber) },
+            { type: "text", text: String(attendance) }
+          ]
+        }
+      ]
     }
   };
 
@@ -66,7 +74,7 @@ async function sendCGPAAlert(toNumber, studentName, cgpa) {
     type: "template",
     template: {
       name: "cgpa_drop_alert",
-      language: { code: "en_US" },
+      language: { code: "en" },
       components: [{
         type: "body",
         parameters: [
@@ -88,32 +96,32 @@ async function sendCGPAAlert(toNumber, studentName, cgpa) {
 // ─── Bulk send to multiple parents ────────────────────────────────────────────
 async function sendBulkAttendanceAlerts(students) {
   const results = [];
-  
+
   for (const student of students) {
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     const result = await sendAttendanceAlert(
       student.parentPhone,
       student.studentName,
       student.rollNumber,
       student.attendance
     );
-    
+
     results.push({
       student: student.studentName,
       phone: student.parentPhone,
       ...result
     });
   }
-  
+
   const successCount = results.filter(r => r.success).length;
   console.log(`📊 Bulk send complete: ${successCount}/${students.length} sent`);
   return results;
 }
 
-module.exports = { 
-  sendTestMessage, 
-  sendAttendanceAlert, 
+module.exports = {
+  sendTestMessage,
+  sendAttendanceAlert,
   sendCGPAAlert,
-  sendBulkAttendanceAlerts 
+  sendBulkAttendanceAlerts
 };

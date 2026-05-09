@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Tenant (Institution/College) ─────────────────────────────────────────────
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String                          // "LPU", "Panjab University"
+  slug        String   @unique               // "lpu", "panjab-uni" (for subdomain)
+  email       String?                        // admin contact email
+  phone       String?
+  logoUrl     String?
+  website     String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  departments  Department[]
+  students     Student[]
+  users        User[]
+  uploads      DataUpload[]
+  commLogs     CommunicationLog[]
+
+  @@map("tenants")
+}
+
+// ─── Department ────────────────────────────────────────────────────────────────
+model Department {
+  id        String   @id @default(cuid())
+  name      String                           // "Computer Science"
+  code      String                           // "CS"
+  tenantId  String
+  createdAt DateTime @default(now())
+
+  // Relations
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  students  Student[]
+  users     User[]
+
+  @@unique([tenantId, code])
+  @@map("departments")
+}
+
+// ─── User (Faculty/Admin/Mentor) ───────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  password     String                        // hashed
+  role         Role     @default(FACULTY)
+  tenantId     String
+  departmentId String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  tenant       Tenant      @relation(fields: [tenantId], references: [id])
+  department   Department? @relation(fields: [departmentId], references: [id])
+  mentorOf     Student[]   @relation("MentorStudents")
+  uploads      DataUpload[]
+  sentLogs     CommunicationLog[]
+
+  @@map("users")
+}
+
+enum Role {
+  SUPER_ADMIN
+  INSTITUTION_ADMIN
+  HOD
+  MENTOR
+  FACULTY
+  PARENT
+  STUDENT
+}
+
+// ─── Student ───────────────────────────────────────────────────────────────────
+model Student {
+  id             String      @id @default(cuid())
+  name           String
+  email          String?
+  rollNumber     String                      // "CS2024001"
+  tenantId       String
+  departmentId   String
+  mentorId       String?
+  batch          Int                         // 2024
+  currentSemester Int        @default(1)
+  
+  // Parent contact
+  parentName     String?
+  parentEmail    String?
+  parentPhone    String?                     // "+917877076804"
+  
+  // Current status (denormalized for quick queries)
+  cgpa           Float?      @default(0)
+  attendance     Float?      @default(0)     // percentage
+  riskCategory   RiskCategory @default(ON_TRACK)
+  
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  department     Department   @relation(fields: [departmentId], references: [id])
+  mentor         User?        @relation("MentorStudents", fields: [mentorId], references: [id])
+  semesterRecords SemesterRecord[]
+  mentorNotes    MentorNote[]
+  commLogs       CommunicationLog[]
+
+  @@unique([tenantId, rollNumber])
+  @@map("students")
+}
+
+enum RiskCategory {
+  ON_TRACK      // CGPA > 7, Attendance > 75%
+  MONITOR       // CGPA 5-7 or Attendance 65-75%
+  AT_RISK       // CGPA < 5 or Attendance < 65%
+  CRITICAL      // CGPA < 4 or Attendance < 50%
+}
+
+// ─── Semester Record ───────────────────────────────────────────────────────────
+model SemesterRecord {
+  id          String   @id @default(cuid())
+  studentId   String
+  semester    Int                            // 1, 2, 3, 4...
+  academicYear String                        // "2024-25"
+  tgpa        Float?                         // Term GPA
+  cgpa        Float?                         // Cumulative GPA
+  attendance  Float?                         // percentage
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  student     Student  @relation(fields: [studentId], references: [id])
+  subjects    SubjectMark[]
+
+  @@unique([studentId, semester, academicYear])
+  @@map("semester_records")
+}
+
+// ─── Subject Mark ──────────────────────────────────────────────────────────────
+model SubjectMark {
+  id               String   @id @default(cuid())
+  semesterRecordId String
+  subjectName      String                   // "Data Structures"
+  subjectCode      String?                  // "CS301"
+  caMarks          Float?                   // Continuous Assessment
+  midtermMarks     Float?
+  endtermMarks     Float?
+  totalMarks       Float?
+  maxMarks         Float?   @default(100)
+  grade            String?                  // "A", "B+", etc.
+  createdAt        DateTime @default(now())
+
+  // Relations
+  semesterRecord   SemesterRecord @relation(fields: [semesterRecordId], references: [id])
+
+  @@map("subject_marks")
+}
+
+// ─── Mentor Note ───────────────────────────────────────────────────────────────
+model MentorNote {
+  id        String   @id @default(cuid())
+  studentId String
+  authorId  String?
+  note      String
+  isPrivate Boolean  @default(false)       // private = only mentor sees
+  createdAt DateTime @default(now())
+
+  // Relations
+  student   Student  @relation(fields: [studentId], references: [id])
+
+  @@map("mentor_notes")
+}
+
+// ─── Communication Log ─────────────────────────────────────────────────────────
+model CommunicationLog {
+  id          String      @id @default(cuid())
+  tenantId    String
+  studentId   String
+  sentById    String?                       // which user triggered it
+  channel     Channel                       // EMAIL, WHATSAPP, SMS
+  type        String                        // "attendance_alert", "monthly_report"
+  recipient   String                        // email or phone number
+  status      CommStatus  @default(PENDING)
+  messageId   String?                       // provider's message ID
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  failReason  String?
+  createdAt   DateTime    @default(now())
+
+  // Relations
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  student     Student  @relation(fields: [studentId], references: [id])
+  sentBy      User?    @relation(fields: [sentById], references: [id])
+
+  @@map("communication_logs")
+}
+
+enum Channel {
+  EMAIL
+  WHATSAPP
+  SMS
+}
+
+enum CommStatus {
+  PENDING
+  SENT
+  DELIVERED
+  OPENED
+  FAILED
+  BOUNCED
+}
+
+// ─── Data Upload ───────────────────────────────────────────────────────────────
+model DataUpload {
+  id          String       @id @default(cuid())
+  tenantId    String
+  uploadedById String?
+  fileName    String
+  fileUrl     String?
+  status      UploadStatus @default(PENDING)
+  totalRows   Int?
+  successRows Int?
+  errorRows   Int?
+  errorLog    Json?                         // array of row errors
+  createdAt   DateTime     @default(now())
+  processedAt DateTime?
+
+  // Relations
+  tenant      Tenant @relation(fields: [tenantId], references: [id])
+  uploadedBy  User?  @relation(fields: [uploadedById], references: [id])
+
+  @@map("data_uploads")
+}
+
+enum UploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
