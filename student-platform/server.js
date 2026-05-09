@@ -1,54 +1,44 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
-
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-const webhookRouter = require('./routes/webhook');
-const studentsRouter = require('./routes/students');
-const alertsRouter = require('./routes/alerts');
-
-app.use('/webhook', webhookRouter);
-app.use('/api/students', studentsRouter);
-app.use('/api/alerts', alertsRouter);
-
-// ─── Health check ─────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.json({
-    status: '✅ Student Platform API Running',
-    version: '1.0.0',
-    timestamp: new Date().toISOString()
-  });
+// CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
 });
 
-// ─── Scheduled Jobs ───────────────────────────────────────────────────────────
+const { authenticateToken } = require('./middleware/auth');
+
+// Public routes
+app.use('/webhook', require('./routes/webhook'));
+app.use('/api/auth', require('./routes/auth'));
+app.get('/', (req, res) => res.json({ status: '✅ Student Platform API Running', version: '1.0.0', timestamp: new Date().toISOString() }));
+
+// Protected routes
+app.use('/api/students', authenticateToken, require('./routes/students'));
+app.use('/api/alerts', authenticateToken, require('./routes/alerts'));
+app.use('/api/upload', authenticateToken, require('./routes/upload'));
+app.use('/api/ai', authenticateToken, require('./routes/ai'));
+
+// Cron jobs
 const { checkAndSendAttendanceAlerts } = require('./workers/alertWorker');
+cron.schedule('0 8 * * 1', () => checkAndSendAttendanceAlerts(75));
+cron.schedule('0 9 * * *', () => checkAndSendAttendanceAlerts(60));
 
-// Every Monday at 8:00 AM — send weekly attendance alerts
-cron.schedule('0 8 * * 1', async () => {
-  console.log('🕐 Running weekly attendance check...');
-  await checkAndSendAttendanceAlerts();
-});
+// 404
+app.use((req, res) => res.status(404).json({ success: false, message: `Route ${req.method} ${req.path} not found` }));
 
-// Every day at 9:00 AM — check for critical attendance (below 60%)
-cron.schedule('0 9 * * *', async () => {
-  console.log('🚨 Running daily critical attendance check...');
-  await checkAndSendAttendanceAlerts(60); // critical threshold
-});
-
-// ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📡 Webhook endpoint: http://localhost:${PORT}/webhook`);
+  console.log(`🔐 Auth: http://localhost:${PORT}/api/auth/login`);
 });
-
-const aiRouter = require('./routes/ai');
-app.use('/api/ai', aiRouter);
-
-const uploadRouter = require('./routes/upload');
-app.use('/api/upload', uploadRouter);
