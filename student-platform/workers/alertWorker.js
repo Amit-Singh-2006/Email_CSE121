@@ -1,7 +1,7 @@
 require('dotenv').config();
 const prisma = require('../lib/prisma');
 const { sendAttendanceAlert } = require('../services/whatsapp');
-const { sendStudentReport } = require('../services/email');
+const { sendStudentReport, sendAIStudentReport, sendBulkReports } = require('../services/email');
 
 // ─── Check and send attendance alerts ─────────────────────────────────────────
 async function checkAndSendAttendanceAlerts(threshold = 75, tenantId = null) {
@@ -88,7 +88,10 @@ async function sendMonthlyReportsToAll(tenantId = null) {
   let sent = 0;
   for (const student of students) {
     await new Promise(resolve => setTimeout(resolve, 200));
-    const result = await sendStudentReport(formatStudentForEmail(student));
+    const tone = student.riskCategory === 'CRITICAL' ? 'urgent' :
+      student.riskCategory === 'AT_RISK' ? 'formal' : 'supportive';
+
+    const result = await sendAIStudentReport(formatStudentForEmail(student), tone);
     if (result.success) {
       sent++;
       await logCommunication({ tenantId: student.tenantId, studentId: student.id, channel: 'EMAIL', type: 'monthly_report', recipient: student.parentEmail, result });
@@ -138,11 +141,22 @@ async function logCommunication({ tenantId, studentId, channel, type, recipient,
 function formatStudentForEmail(student) {
   const latestSem = student.semesterRecords?.[0];
   return {
-    name: student.name, rollNumber: student.rollNumber,
-    parentName: student.parentName, parentEmail: student.parentEmail,
-    department: student.department?.name, semester: student.currentSemester,
-    cgpa: student.cgpa, attendance: student.attendance,
-    subjects: latestSem?.subjects?.map(s => ({ name: s.subjectName, ca: s.caMarks, mid: s.midtermMarks, end: s.endtermMarks, total: s.totalMarks }))
+    name: student.name,
+    rollNumber: student.rollNumber,
+    parentName: student.parentName,
+    parentEmail: student.parentEmail,
+    department: student.department?.name,
+    semester: student.currentSemester,
+    cgpa: student.cgpa,
+    attendance: student.attendance,
+    riskCategory: student.riskCategory,  // ← ADD THIS
+    subjects: latestSem?.subjects?.map(s => ({
+      name: s.subjectName,
+      ca: s.caMarks,
+      mid: s.midtermMarks,
+      end: s.endtermMarks,
+      total: s.totalMarks
+    }))
   };
 }
 
