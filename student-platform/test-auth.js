@@ -3,7 +3,7 @@ const axios = require('axios');
 async function test() {
     const reg = await axios.post('http://localhost:3000/api/auth/register', {
         name: 'Amit Admin',
-        email: 'superadmin@lpu.com',
+        email: 'admin7291@lpu.com',
         password: 'Admin@123',
         role: 'INSTITUTION_ADMIN',
         tenantId: 'cmoy07h1h0000ksrjph6lv8iz'

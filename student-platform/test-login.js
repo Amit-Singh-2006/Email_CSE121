@@ -1,13 +1,11 @@
 const axios = require('axios');
 
 async function test() {
-    const res = await axios.post('http://localhost:3000/api/auth/login', {
-        email: 'amit.panwar2k6@gmail.com',
-        password: 'hashed_password_here'
+    const res = await axios.post('https://web-production-7d77.up.railway.app/api/auth/login', {
+        email: 'admin7291@lpu.com',
+        password: 'Admin@123'
     });
-    console.log('✅ Logged in!');
-    console.log('\n🔑 YOUR TOKEN:');
-    console.log(res.data.token);
+    console.log('🔑 TOKEN:', res.data.token);
 }
 
 test().catch(err => console.error('❌', err.response?.data || err.message));
